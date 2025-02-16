@@ -8,70 +8,83 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title MerkleAirdrop
- * @dev A contract that verifies pre-calculated user amounts using a Merkle tree for efficient on-chain verification.
+ * @dev A smart contract for token airdrops with Merkle tree verification
+ * @notice Supports multiple airdrop rounds with efficient claim tracking
  */
 contract MerkleAirdrop is Ownable {
     using SafeERC20 for IERC20;
 
+    /// @notice Current token being distributed
     IERC20 public token;
-
-    // Merkle root of pre-calculated (address, amount) pairs
+    
+    /// @notice Current Merkle root for verification
     bytes32 public merkleRoot;
 
-    // Mapping to prevent duplicate claims
-    mapping(address => bool) public hasClaimed;
+    /// @notice Mapping of (merkleRoot => user => hasClaimed) to track claims per round
+    mapping(bytes32 => mapping(address => bool)) public hasClaimed;
 
-    event MerkleRootSet(bytes32 merkleRoot);
+    event AirdropInitialized(address indexed token, bytes32 indexed merkleRoot, uint256 depositAmount);
     event Claimed(address indexed claimant, uint256 amount);
     event WithdrawUnclaimed(address indexed owner, uint256 amount);
-    event TokenSet(address indexed tokenAddress);
+
+    error InvalidTokenAddress();
+    error TokenNotSet();
+    error MerkleRootNotSet();
+    error AlreadyClaimed();
+    error InvalidProof();
+    error NoTokensToWithdraw();
+    error ContractHasLeftoverTokens();
 
     constructor() Ownable(msg.sender) {}
 
     /**
-     * @dev Set or change the token address
+     * @dev Initialize a new airdrop round
+     * @param _token ERC20 token address for distribution
+     * @param _merkleRoot Merkle root of the current round's user data
+     * @param _depositAmount Amount of tokens to deposit for the airdrop
+     * @notice Previous round must be completed (all tokens withdrawn) before starting new round
      */
-    function setToken(IERC20 _token) external onlyOwner {
-        require(address(_token) != address(0), "Invalid token address");
-        // Check if there's no remaining balance before changing token
+    function initAirdrop(
+        IERC20 _token,
+        bytes32 _merkleRoot,
+        uint256 _depositAmount
+    ) external onlyOwner {
+        if (address(_token) == address(0)) revert InvalidTokenAddress();
+        
+        // Prevent new round if current round has remaining tokens
         if (address(token) != address(0)) {
-            require(token.balanceOf(address(this)) == 0, "Contract still has token balance");
+            if (token.balanceOf(address(this)) > 0) revert ContractHasLeftoverTokens();
         }
+
+        // Set up new round
         token = _token;
-        emit TokenSet(address(_token));
-    }
-
-    /**
-     * @dev Set the Merkle root. Can be updated for multiple rounds.
-     */
-    function setMerkleRoot(bytes32 _merkleRoot) external onlyOwner {
         merkleRoot = _merkleRoot;
-        emit MerkleRootSet(_merkleRoot);
+
+        // Transfer tokens to contract (requires prior approval from owner)
+        if (_depositAmount > 0) {
+            token.safeTransferFrom(msg.sender, address(this), _depositAmount);
+        }
+
+        emit AirdropInitialized(address(_token), _merkleRoot, _depositAmount);
     }
 
     /**
-     * @dev Owner deposits tokens to the contract (airdrop pool)
-     */
-    function depositTokens(uint256 amount) external onlyOwner {
-        require(address(token) != address(0), "Token not set");
-        require(amount > 0, "Cannot deposit zero");
-        token.safeTransferFrom(msg.sender, address(this), amount);
-    }
-
-    /**
-     * @dev Users claim tokens by submitting amount and merkleProof
+     * @dev Claim tokens by submitting amount and merkle proof
+     * @param amount Token amount to claim
+     * @param merkleProof Merkle proof for verification
+     * @notice Each address can only claim once per round
      */
     function claim(uint256 amount, bytes32[] calldata merkleProof) external {
-        require(address(token) != address(0), "Token not set");
-        require(!hasClaimed[msg.sender], "Already claimed");
-        require(merkleRoot != bytes32(0), "Merkle root not set");
+        if (address(token) == address(0)) revert TokenNotSet();
+        if (merkleRoot == bytes32(0)) revert MerkleRootNotSet();
+        if (hasClaimed[merkleRoot][msg.sender]) revert AlreadyClaimed();
 
-        // Merkle tree leaf
+        // Create leaf from user data and verify proof
         bytes32 leaf = keccak256(abi.encode(msg.sender, amount));
-        bool valid = MerkleProof.verify(merkleProof, merkleRoot, leaf);
-        require(valid, "Invalid proof");
+        if (!MerkleProof.verify(merkleProof, merkleRoot, leaf)) revert InvalidProof();
 
-        hasClaimed[msg.sender] = true;
+        // Mark as claimed before transfer to prevent reentrancy
+        hasClaimed[merkleRoot][msg.sender] = true;
 
         // Transfer tokens
         token.safeTransfer(msg.sender, amount);
@@ -80,14 +93,25 @@ contract MerkleAirdrop is Ownable {
     }
 
     /**
-     * @dev Owner can withdraw unclaimed tokens
+     * @dev Withdraw all remaining tokens
+     * @notice After withdrawal, a new round can be started with initAirdrop
      */
-    function withdrawUnclaimed(uint256 amount) external onlyOwner {
-        require(address(token) != address(0), "Token not set");
+    function withdrawUnclaimed() external onlyOwner {
+        if (address(token) == address(0)) revert TokenNotSet();
+        
         uint256 bal = token.balanceOf(address(this));
-        require(amount <= bal, "Not enough tokens");
-        token.safeTransfer(msg.sender, amount);
+        if (bal == 0) revert NoTokensToWithdraw();
 
-        emit WithdrawUnclaimed(msg.sender, amount);
+        token.safeTransfer(msg.sender, bal);
+        emit WithdrawUnclaimed(msg.sender, bal);
+    }
+
+    /**
+     * @dev Check if a user has claimed in the current round
+     * @param user Address to check
+     * @return bool True if the user has already claimed in this round
+     */
+    function isClaimed(address user) external view returns (bool) {
+        return hasClaimed[merkleRoot][user];
     }
 } 

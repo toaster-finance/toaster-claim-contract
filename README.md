@@ -8,8 +8,7 @@ A smart contract for token airdrop using Merkle Tree for efficient and secure to
 - ERC20 token support
 - Duplicate claim prevention
 - Gas-efficient verification system
-- Token address management
-- Unclaimed token recovery
+- Single-function airdrop initialization
 
 ## Tech Stack
 
@@ -31,6 +30,9 @@ yarn compile
 
 # Run tests
 yarn test
+
+# Generate ABI
+yarn generate-abi
 ```
 
 ## Environment Setup
@@ -70,28 +72,26 @@ yarn deploy:metis
 
 1. Save the deployed contract address
 
-2. Set ERC20 Token
+2. Initialize Airdrop
 
 ```typescript
-await merkleAirdrop.setToken(tokenAddress);
+await merkleAirdrop.initAirdrop(tokenAddress, merkleRoot, depositAmount);
 ```
 
-3. Set Merkle Root
-
-```typescript
-await merkleAirdrop.setMerkleRoot(merkleRoot);
-```
-
-4. Deposit Tokens
-
-```typescript
-await merkleAirdrop.depositTokens(amount);
-```
-
-5. User Claim
+3. User Claim
 
 ```typescript
 await merkleAirdrop.claim(amount, merkleProof);
+```
+
+4. Start New Round
+
+```typescript
+// Withdraw remaining tokens from previous round
+await merkleAirdrop.withdrawUnclaimed();
+
+// Initialize new round
+await merkleAirdrop.initAirdrop(newTokenAddress, newMerkleRoot, newDepositAmount);
 ```
 
 ## Development Commands
@@ -114,14 +114,23 @@ yarn format
 
 # Clean artifacts
 yarn clean
+
+# Generate contract ABI
+yarn generate-abi
 ```
+
+## Contract ABI
+
+The contract ABI is available in the `abi` directory after running `yarn generate-abi`. This ABI is required for interacting with the deployed contract from external applications.
 
 ## Security Considerations
 
-- Token address can only be changed when contract balance is zero
-- Mapping used to prevent duplicate claims
+- Single initialization function to prevent inconsistent states
+- Automatic claim status reset on new round initialization
+- Token balance must be zero before starting a new round
 - Secure OpenZeppelin libraries implementation
 - Efficient and secure verification through Merkle Tree
+- Double-mapping for tracking claims per round
 
 ## License
 

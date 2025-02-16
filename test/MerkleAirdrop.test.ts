@@ -7,11 +7,10 @@ import { MerkleTree } from "merkletreejs";
 
 interface IMerkleAirdrop extends BaseContract {
   merkleRoot(): Promise<string>;
-  setMerkleRoot(root: string): Promise<any>;
-  depositTokens(amount: bigint): Promise<any>;
+  initAirdrop(token: string, merkleRoot: string, amount: bigint): Promise<any>;
   claim(amount: bigint, proof: string[]): Promise<any>;
-  withdrawUnclaimed(amount: bigint): Promise<any>;
-  setToken(token: string): Promise<any>;
+  withdrawUnclaimed(): Promise<any>;
+  isClaimed(user: string): Promise<boolean>;
   connect(signer: HardhatEthersSigner): IMerkleAirdrop;
   getAddress(): Promise<string>;
 }
@@ -26,6 +25,7 @@ interface IERC20 extends BaseContract {
 describe("MerkleAirdrop", function () {
   let merkleAirdrop: IMerkleAirdrop;
   let token: IERC20;
+  let newToken: IERC20;
   let owner: HardhatEthersSigner;
   let addr1: HardhatEthersSigner;
   let addr2: HardhatEthersSigner;
@@ -42,16 +42,14 @@ describe("MerkleAirdrop", function () {
       { account: addr3, amount: ethers.parseEther("300") },
     ];
 
-    // Deploy mock ERC20 token
-    const MockToken: ContractFactory = await ethers.getContractFactory("MockERC20");
+    // Deploy mock ERC20 tokens
+    const MockToken = await ethers.getContractFactory("MockERC20");
     token = (await MockToken.deploy("Mock Token", "MTK")) as unknown as IERC20;
+    newToken = (await MockToken.deploy("New Token", "NTK")) as unknown as IERC20;
 
     // Deploy MerkleAirdrop contract
-    const MerkleAirdrop: ContractFactory = await ethers.getContractFactory("MerkleAirdrop");
-    merkleAirdrop = (await MerkleAirdrop.deploy()) as IMerkleAirdrop;
-
-    // Set token
-    await merkleAirdrop.setToken(await token.getAddress());
+    const MerkleAirdrop = await ethers.getContractFactory("MerkleAirdrop");
+    merkleAirdrop = (await MerkleAirdrop.deploy()) as unknown as IMerkleAirdrop;
 
     // Create merkle tree
     const abiCoder = new AbiCoder();
@@ -60,104 +58,145 @@ describe("MerkleAirdrop", function () {
     );
     merkleTree = new MerkleTree(leaves, solidityKeccak256, { sortPairs: true });
 
-    // Mint tokens to owner and approve MerkleAirdrop contract
+    // Mint tokens and approve
     await token.mint(owner.address, ethers.parseEther("1000"));
     await token.approve(await merkleAirdrop.getAddress(), ethers.parseEther("1000"));
+    await newToken.mint(owner.address, ethers.parseEther("1000"));
+    await newToken.approve(await merkleAirdrop.getAddress(), ethers.parseEther("1000"));
   });
 
-  describe("Token Management", function () {
-    it("Should set token correctly", async function () {
-      const MockToken = await ethers.getContractFactory("MockERC20");
-      const newToken = (await MockToken.deploy("New Token", "NTK")) as unknown as IERC20;
-      await merkleAirdrop.setToken(await newToken.getAddress());
-    });
-
-    it("Should not allow setting zero address as token", async function () {
-      await expect(merkleAirdrop.setToken(ethers.ZeroAddress)).to.be.revertedWith(
-        "Invalid token address",
+  describe("Airdrop Initialization", function () {
+    it("Should initialize airdrop correctly", async function () {
+      await merkleAirdrop.initAirdrop(
+        await token.getAddress(),
+        merkleTree.getHexRoot(),
+        ethers.parseEther("1000"),
       );
     });
 
-    it("Should not allow changing token when balance exists", async function () {
-      await merkleAirdrop.depositTokens(ethers.parseEther("100"));
-      const MockToken = await ethers.getContractFactory("MockERC20");
-      const newToken = (await MockToken.deploy("New Token", "NTK")) as unknown as IERC20;
-      await expect(merkleAirdrop.setToken(await newToken.getAddress())).to.be.revertedWith(
-        "Contract still has token balance",
+    it("Should not allow initialization with zero address token", async function () {
+      await expect(
+        merkleAirdrop.initAirdrop(
+          ethers.ZeroAddress,
+          merkleTree.getHexRoot(),
+          ethers.parseEther("1000"),
+        ),
+      ).to.be.revertedWithCustomError(merkleAirdrop, "InvalidTokenAddress");
+    });
+
+    it("Should not allow new initialization when tokens remain", async function () {
+      await merkleAirdrop.initAirdrop(
+        await token.getAddress(),
+        merkleTree.getHexRoot(),
+        ethers.parseEther("1000"),
       );
+
+      await expect(
+        merkleAirdrop.initAirdrop(
+          await newToken.getAddress(),
+          merkleTree.getHexRoot(),
+          ethers.parseEther("1000"),
+        ),
+      ).to.be.revertedWithCustomError(merkleAirdrop, "ContractHasLeftoverTokens");
     });
   });
 
-  it("Should set merkle root correctly", async function () {
-    const root = merkleTree.getHexRoot();
-    await merkleAirdrop.setMerkleRoot(root);
-    expect(await merkleAirdrop.merkleRoot()).to.equal(root);
+  describe("Claiming", function () {
+    beforeEach(async function () {
+      await merkleAirdrop.initAirdrop(
+        await token.getAddress(),
+        merkleTree.getHexRoot(),
+        ethers.parseEther("1000"),
+      );
+    });
+
+    it("Should allow valid claims", async function () {
+      const abiCoder = new AbiCoder();
+      const leaf = solidityKeccak256(
+        abiCoder.encode(["address", "uint256"], [addr1.address, airdropAmounts[0].amount]),
+      );
+      const proof = merkleTree.getHexProof(leaf);
+
+      await merkleAirdrop.connect(addr1).claim(airdropAmounts[0].amount, proof);
+      expect(await token.balanceOf(addr1.address)).to.equal(airdropAmounts[0].amount);
+      expect(await merkleAirdrop.isClaimed(addr1.address)).to.be.true;
+    });
+
+    it("Should prevent duplicate claims in same round", async function () {
+      const abiCoder = new AbiCoder();
+      const leaf = solidityKeccak256(
+        abiCoder.encode(["address", "uint256"], [addr1.address, airdropAmounts[0].amount]),
+      );
+      const proof = merkleTree.getHexProof(leaf);
+
+      await merkleAirdrop.connect(addr1).claim(airdropAmounts[0].amount, proof);
+      await expect(
+        merkleAirdrop.connect(addr1).claim(airdropAmounts[0].amount, proof),
+      ).to.be.revertedWithCustomError(merkleAirdrop, "AlreadyClaimed");
+    });
+
+    it("Should allow claiming in new round", async function () {
+      // First round claim
+      const abiCoder = new AbiCoder();
+      const leaf = solidityKeccak256(
+        abiCoder.encode(["address", "uint256"], [addr1.address, airdropAmounts[0].amount]),
+      );
+      const proof = merkleTree.getHexProof(leaf);
+
+      await merkleAirdrop.connect(addr1).claim(airdropAmounts[0].amount, proof);
+
+      // Create new merkle tree for second round with different amounts
+      const newAirdropAmounts = [
+        { account: addr1, amount: ethers.parseEther("150") },
+        { account: addr2, amount: ethers.parseEther("250") },
+        { account: addr3, amount: ethers.parseEther("350") },
+      ];
+
+      const newLeaves = newAirdropAmounts.map((x) =>
+        solidityKeccak256(abiCoder.encode(["address", "uint256"], [x.account.address, x.amount])),
+      );
+      const newMerkleTree = new MerkleTree(newLeaves, solidityKeccak256, { sortPairs: true });
+
+      // Withdraw and start new round
+      await merkleAirdrop.withdrawUnclaimed();
+      await merkleAirdrop.initAirdrop(
+        await newToken.getAddress(),
+        newMerkleTree.getHexRoot(),
+        ethers.parseEther("1000"),
+      );
+
+      // Should be able to claim in new round with new amount
+      const newLeaf = solidityKeccak256(
+        abiCoder.encode(["address", "uint256"], [addr1.address, newAirdropAmounts[0].amount]),
+      );
+      const newProof = newMerkleTree.getHexProof(newLeaf);
+
+      await merkleAirdrop.connect(addr1).claim(newAirdropAmounts[0].amount, newProof);
+      expect(await newToken.balanceOf(addr1.address)).to.equal(newAirdropAmounts[0].amount);
+    });
   });
 
-  it("Should deposit tokens correctly", async function () {
-    const amount = ethers.parseEther("1000");
-    await merkleAirdrop.depositTokens(amount);
-    expect(await token.balanceOf(await merkleAirdrop.getAddress())).to.equal(amount);
-  });
+  describe("Withdrawing", function () {
+    beforeEach(async function () {
+      await merkleAirdrop.initAirdrop(
+        await token.getAddress(),
+        merkleTree.getHexRoot(),
+        ethers.parseEther("1000"),
+      );
+    });
 
-  it("Should allow valid claims", async function () {
-    // Set merkle root and deposit tokens
-    await merkleAirdrop.setMerkleRoot(merkleTree.getHexRoot());
-    await merkleAirdrop.depositTokens(ethers.parseEther("1000"));
+    it("Should allow owner to withdraw all unclaimed tokens", async function () {
+      await merkleAirdrop.withdrawUnclaimed();
+      expect(await token.balanceOf(await merkleAirdrop.getAddress())).to.equal(0n);
+      expect(await token.balanceOf(owner.address)).to.equal(ethers.parseEther("1000"));
+    });
 
-    // Claim for addr1
-    const abiCoder = new AbiCoder();
-    const leaf = solidityKeccak256(
-      abiCoder.encode(["address", "uint256"], [addr1.address, airdropAmounts[0].amount]),
-    );
-    const proof = merkleTree.getHexProof(leaf);
-
-    await merkleAirdrop.connect(addr1).claim(airdropAmounts[0].amount, proof);
-    expect(await token.balanceOf(addr1.address)).to.equal(airdropAmounts[0].amount);
-  });
-
-  it("Should prevent duplicate claims", async function () {
-    await merkleAirdrop.setMerkleRoot(merkleTree.getHexRoot());
-    await merkleAirdrop.depositTokens(ethers.parseEther("1000"));
-
-    const abiCoder = new AbiCoder();
-    const leaf = solidityKeccak256(
-      abiCoder.encode(["address", "uint256"], [addr1.address, airdropAmounts[0].amount]),
-    );
-    const proof = merkleTree.getHexProof(leaf);
-
-    await merkleAirdrop.connect(addr1).claim(airdropAmounts[0].amount, proof);
-    await expect(
-      merkleAirdrop.connect(addr1).claim(airdropAmounts[0].amount, proof),
-    ).to.be.revertedWith("Already claimed");
-  });
-
-  it("Should reject invalid proofs", async function () {
-    await merkleAirdrop.setMerkleRoot(merkleTree.getHexRoot());
-    await merkleAirdrop.depositTokens(ethers.parseEther("1000"));
-
-    const abiCoder = new AbiCoder();
-    const leaf = solidityKeccak256(
-      abiCoder.encode(["address", "uint256"], [addr1.address, airdropAmounts[0].amount]),
-    );
-    const proof = merkleTree.getHexProof(leaf);
-
-    // Try to claim with wrong amount
-    await expect(
-      merkleAirdrop.connect(addr1).claim(ethers.parseEther("999"), proof),
-    ).to.be.revertedWith("Invalid proof");
-  });
-
-  it("Should allow owner to withdraw unclaimed tokens", async function () {
-    const depositAmount = ethers.parseEther("1000");
-    await merkleAirdrop.depositTokens(depositAmount);
-
-    const withdrawAmount = ethers.parseEther("500");
-    await merkleAirdrop.withdrawUnclaimed(withdrawAmount);
-
-    expect(await token.balanceOf(await merkleAirdrop.getAddress())).to.equal(
-      depositAmount - withdrawAmount,
-    );
-    expect(await token.balanceOf(owner.address)).to.equal(withdrawAmount);
+    it("Should not allow withdrawal when no tokens exist", async function () {
+      await merkleAirdrop.withdrawUnclaimed();
+      await expect(merkleAirdrop.withdrawUnclaimed()).to.be.revertedWithCustomError(
+        merkleAirdrop,
+        "NoTokensToWithdraw",
+      );
+    });
   });
 });
