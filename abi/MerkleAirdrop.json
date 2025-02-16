@@ -1,5 +1,11 @@
 [
   { "type": "constructor", "stateMutability": "undefined", "payable": false, "inputs": [] },
+  { "type": "error", "name": "AlreadyClaimed", "inputs": [] },
+  { "type": "error", "name": "ContractHasLeftoverTokens", "inputs": [] },
+  { "type": "error", "name": "InvalidProof", "inputs": [] },
+  { "type": "error", "name": "InvalidTokenAddress", "inputs": [] },
+  { "type": "error", "name": "MerkleRootNotSet", "inputs": [] },
+  { "type": "error", "name": "NoTokensToWithdraw", "inputs": [] },
   {
     "type": "error",
     "name": "OwnableInvalidOwner",
@@ -15,6 +21,17 @@
     "name": "SafeERC20FailedOperation",
     "inputs": [{ "type": "address", "name": "token" }]
   },
+  { "type": "error", "name": "TokenNotSet", "inputs": [] },
+  {
+    "type": "event",
+    "anonymous": false,
+    "name": "AirdropInitialized",
+    "inputs": [
+      { "type": "address", "name": "token", "indexed": true },
+      { "type": "bytes32", "name": "merkleRoot", "indexed": true },
+      { "type": "uint256", "name": "depositAmount", "indexed": false }
+    ]
+  },
   {
     "type": "event",
     "anonymous": false,
@@ -27,23 +44,11 @@
   {
     "type": "event",
     "anonymous": false,
-    "name": "MerkleRootSet",
-    "inputs": [{ "type": "bytes32", "name": "merkleRoot", "indexed": false }]
-  },
-  {
-    "type": "event",
-    "anonymous": false,
     "name": "OwnershipTransferred",
     "inputs": [
       { "type": "address", "name": "previousOwner", "indexed": true },
       { "type": "address", "name": "newOwner", "indexed": true }
     ]
-  },
-  {
-    "type": "event",
-    "anonymous": false,
-    "name": "TokenSet",
-    "inputs": [{ "type": "address", "name": "tokenAddress", "indexed": true }]
   },
   {
     "type": "event",
@@ -67,19 +72,35 @@
   },
   {
     "type": "function",
-    "name": "depositTokens",
-    "constant": false,
-    "payable": false,
-    "inputs": [{ "type": "uint256", "name": "amount" }],
-    "outputs": []
-  },
-  {
-    "type": "function",
     "name": "hasClaimed",
     "constant": true,
     "stateMutability": "view",
     "payable": false,
-    "inputs": [{ "type": "address", "name": "" }],
+    "inputs": [
+      { "type": "bytes32", "name": "" },
+      { "type": "address", "name": "" }
+    ],
+    "outputs": [{ "type": "bool", "name": "" }]
+  },
+  {
+    "type": "function",
+    "name": "initAirdrop",
+    "constant": false,
+    "payable": false,
+    "inputs": [
+      { "type": "address", "name": "_token" },
+      { "type": "bytes32", "name": "_merkleRoot" },
+      { "type": "uint256", "name": "_depositAmount" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "isClaimed",
+    "constant": true,
+    "stateMutability": "view",
+    "payable": false,
+    "inputs": [{ "type": "address", "name": "user" }],
     "outputs": [{ "type": "bool", "name": "" }]
   },
   {
@@ -110,22 +131,6 @@
   },
   {
     "type": "function",
-    "name": "setMerkleRoot",
-    "constant": false,
-    "payable": false,
-    "inputs": [{ "type": "bytes32", "name": "_merkleRoot" }],
-    "outputs": []
-  },
-  {
-    "type": "function",
-    "name": "setToken",
-    "constant": false,
-    "payable": false,
-    "inputs": [{ "type": "address", "name": "_token" }],
-    "outputs": []
-  },
-  {
-    "type": "function",
     "name": "token",
     "constant": true,
     "stateMutability": "view",
@@ -146,7 +151,7 @@
     "name": "withdrawUnclaimed",
     "constant": false,
     "payable": false,
-    "inputs": [{ "type": "uint256", "name": "amount" }],
+    "inputs": [],
     "outputs": []
   }
 ]
