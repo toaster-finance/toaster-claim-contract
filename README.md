@@ -47,7 +47,13 @@ cp .env.example .env
 # .env file configuration
 METIS_RPC_URL=https://andromeda.metis.io/?owner=1088
 PRIVATE_KEY=your_private_key_here
-ETHERSCAN_API_KEY=your_etherscan_api_key_here
+
+# Contract Addresses
+AIRDROP_CONTRACT_ADDRESS=your_airdrop_contract_address
+REWARD_TOKEN_ADDRESS=your_reward_token_address
+
+# Merkle Tree
+MERKLE_ROOT=your_merkle_root_here
 ```
 
 ## Deployment
@@ -70,12 +76,12 @@ yarn deploy:metis
 
 ## Contract Usage
 
-1. Save the deployed contract address
+1. Save the deployed contract address and update `.env` file with the contract addresses and merkle root
 
 2. Initialize Airdrop
 
-```typescript
-await merkleAirdrop.initAirdrop(tokenAddress, merkleRoot, depositAmount);
+```bash
+yarn init-airdrop
 ```
 
 3. User Claim
