@@ -10,6 +10,7 @@
     "compile": "hardhat compile",
     "test": "hardhat test",
     "deploy:metis": "hardhat run scripts/deploy.ts --network metis",
+    "deploy:boba": "hardhat run scripts/deploy.ts --network boba",
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
     "node": "hardhat node",
     "clean": "hardhat clean",

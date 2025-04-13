@@ -15,6 +15,11 @@ const config: HardhatUserConfig = {
       accounts: [process.env.PRIVATE_KEY || ""],
       chainId: 1088,
     },
+    boba: {
+      url: "https://mainnet.boba.network",
+      accounts: [process.env.PRIVATE_KEY || ""],
+      chainId: 288,
+    },
   },
 };
 
