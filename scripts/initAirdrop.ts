@@ -1,4 +1,4 @@
-import { ethers } from "hardhat";
+import { ethers, network } from "hardhat";
 import { config as dotenvConfig } from "dotenv";
 import { resolve } from "path";
 import { MerkleAirdrop } from "../typechain-types";
@@ -7,18 +7,50 @@ import { MerkleAirdrop } from "../typechain-types";
 dotenvConfig({ path: resolve(__dirname, "../.env") });
 
 async function main() {
-  if (!process.env.AIRDROP_CONTRACT_ADDRESS) throw new Error("AIRDROP_CONTRACT_ADDRESS not set");
-  if (!process.env.REWARD_TOKEN_ADDRESS) throw new Error("REWARD_TOKEN_ADDRESS not set");
+  // 현재 사용할 네트워크 설정 (기본값: 현재 하드햇 네트워크)
+  const networkName = network.name;
+  const manualNetwork = process.env.NETWORK || networkName;
+
+  // 네트워크에 따른 컨트랙트 주소 설정
+  let airdropContractAddress: string;
+  let rewardTokenAddress: string;
+
+  if (manualNetwork === "boba") {
+    airdropContractAddress = process.env.BOBA_AIRDROP_CONTRACT_ADDRESS || "";
+    rewardTokenAddress = process.env.BOBA_REWARD_TOKEN_ADDRESS || "";
+    console.log("Using Boba Network contracts");
+  } else if (manualNetwork === "metis") {
+    airdropContractAddress = process.env.METIS_AIRDROP_CONTRACT_ADDRESS || "";
+    rewardTokenAddress = process.env.METIS_REWARD_TOKEN_ADDRESS || "";
+    console.log("Using Metis Network contracts");
+  } else {
+    throw new Error(`Unsupported network: ${manualNetwork}`);
+  }
+
+  if (!airdropContractAddress) {
+    throw new Error(
+      `AIRDROP_CONTRACT_ADDRESS for ${manualNetwork} network is not set in .env file`,
+    );
+  }
+
+  if (!rewardTokenAddress) {
+    throw new Error(`REWARD_TOKEN_ADDRESS for ${manualNetwork} network is not set in .env file`);
+  }
+
   if (!process.env.MERKLE_ROOT) throw new Error("MERKLE_ROOT not set");
   if (!process.env.TOKEN_DECIMALS) throw new Error("TOKEN_DECIMALS not set");
   if (!process.env.AIRDROP_AMOUNT) throw new Error("AIRDROP_AMOUNT not set");
 
+  console.log(`네트워크: ${networkName} (설정: ${manualNetwork})`);
+  console.log(`에어드롭 컨트랙트 주소: ${airdropContractAddress}`);
+  console.log(`리워드 토큰 주소: ${rewardTokenAddress}`);
+
   // 컨트랙트 인스턴스 가져오기
   const airdrop = (await ethers.getContractAt(
     "MerkleAirdrop",
-    process.env.AIRDROP_CONTRACT_ADDRESS,
+    airdropContractAddress,
   )) as MerkleAirdrop;
-  const token = await ethers.getContractAt("IERC20", process.env.REWARD_TOKEN_ADDRESS);
+  const token = await ethers.getContractAt("IERC20", rewardTokenAddress);
 
   // 토큰 승인
   const totalAmount = ethers.parseUnits(
